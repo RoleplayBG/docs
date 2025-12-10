@@ -1,0 +1,611 @@
+---
+title: "Testing"
+description: "Vitest unit tests and Playwright E2E tests"
+---
+
+## Overview
+
+BIGPEDAL uses a comprehensive testing strategy with Vitest for unit tests and Playwright for end-to-end tests, ensuring code quality and reliability.
+
+## Test suite overview
+
+- **74 passing unit tests** across 13 test files
+- **E2E tests** covering critical user flows
+- **Test coverage** tracking with Vitest
+- **CI/CD integration** ready
+
+## Unit testing with Vitest
+
+### Setup
+
+Vitest is configured in `vitest.config.ts`:
+
+```typescript
+import { defineConfig } from "vitest/config"
+import react from "@vitejs/plugin-react"
+import path from "path"
+
+export default defineConfig({
+  plugins: [react()],
+  test: {
+    environment: "jsdom",
+    setupFiles: ["./vitest.setup.ts"],
+    globals: true,
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "json", "html"]
+    }
+  },
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "./")
+    }
+  }
+})
+```
+
+### Running tests
+
+```bash
+# Run all tests
+npm run test
+
+# Run tests in watch mode
+npm run test:watch
+
+# Run tests with coverage
+npm run test:coverage
+
+# Run specific test file
+npm run test tests/unit/auth.test.ts
+```
+
+### Test structure
+
+```typescript
+// tests/unit/example.test.ts
+import { describe, it, expect, beforeEach, afterEach } from "vitest"
+
+describe("Feature name", () => {
+  beforeEach(() => {
+    // Setup before each test
+  })
+  
+  afterEach(() => {
+    // Cleanup after each test
+  })
+  
+  it("should do something", () => {
+    // Arrange
+    const input = "test"
+    
+    // Act
+    const result = someFunction(input)
+    
+    // Assert
+    expect(result).toBe("expected")
+  })
+})
+```
+
+## Unit test examples
+
+### Testing utilities
+
+```typescript
+// tests/unit/validations/egn.test.ts
+import { describe, it, expect } from "vitest"
+import { validateEGN } from "@/lib/validations/egn"
+
+describe("EGN validation", () => {
+  it("validates correct EGN", () => {
+    expect(validateEGN("7523169263")).toBe(true)
+  })
+  
+  it("rejects invalid EGN", () => {
+    expect(validateEGN("1234567890")).toBe(false)
+  })
+  
+  it("rejects EGN with wrong length", () => {
+    expect(validateEGN("123")).toBe(false)
+  })
+})
+```
+
+### Testing API routes
+
+```typescript
+// tests/unit/api/services.test.ts
+import { describe, it, expect, vi } from "vitest"
+import { GET } from "@/app/api/services/route"
+
+describe("GET /api/services", () => {
+  it("returns services list", async () => {
+    const request = new Request("http://localhost:3000/api/services")
+    const response = await GET(request)
+    const data = await response.json()
+    
+    expect(response.status).toBe(200)
+    expect(data.services).toBeInstanceOf(Array)
+  })
+  
+  it("filters by category", async () => {
+    const request = new Request(
+      "http://localhost:3000/api/services?category=civil"
+    )
+    const response = await GET(request)
+    const data = await response.json()
+    
+    expect(data.services.every(s => s.category === "civil")).toBe(true)
+  })
+})
+```
+
+### Testing React components
+
+```typescript
+// tests/unit/components/service-card.test.tsx
+import { describe, it, expect } from "vitest"
+import { render, screen } from "@testing-library/react"
+import { ServiceCard } from "@/components/services/ServiceCard"
+
+describe("ServiceCard", () => {
+  const mockService = {
+    id: "1",
+    title: "Test Service",
+    summary: "Test summary",
+    category: "civil"
+  }
+  
+  it("renders service title", () => {
+    render(<ServiceCard service={mockService} />)
+    expect(screen.getByText("Test Service")).toBeInTheDocument()
+  })
+  
+  it("renders service summary", () => {
+    render(<ServiceCard service={mockService} />)
+    expect(screen.getByText("Test summary")).toBeInTheDocument()
+  })
+})
+```
+
+### Testing with mocks
+
+```typescript
+// tests/unit/lib/ai/client.test.ts
+import { describe, it, expect, vi } from "vitest"
+import { generateResponse } from "@/lib/ai/client"
+
+// Mock Google Gemini API
+vi.mock("@google/generative-ai", () => ({
+  GoogleGenerativeAI: vi.fn(() => ({
+    getGenerativeModel: vi.fn(() => ({
+      generateContent: vi.fn(() => ({
+        response: {
+          text: () => "Mocked response"
+        }
+      }))
+    }))
+  }))
+}))
+
+describe("AI client", () => {
+  it("generates response", async () => {
+    const response = await generateResponse("Hello")
+    expect(response).toBe("Mocked response")
+  })
+})
+```
+
+## E2E testing with Playwright
+
+### Setup
+
+Playwright is configured in `playwright.config.ts`:
+
+```typescript
+import { defineConfig, devices } from "@playwright/test"
+
+export default defineConfig({
+  testDir: "./tests/e2e",
+  fullyParallel: true,
+  forbidOnly: !!process.env.CI,
+  retries: process.env.CI ? 2 : 0,
+  workers: process.env.CI ? 1 : undefined,
+  reporter: "html",
+  use: {
+    baseURL: "http://localhost:3000",
+    trace: "on-first-retry"
+  },
+  projects: [
+    {
+      name: "chromium",
+      use: { ...devices["Desktop Chrome"] }
+    },
+    {
+      name: "firefox",
+      use: { ...devices["Desktop Firefox"] }
+    },
+    {
+      name: "webkit",
+      use: { ...devices["Desktop Safari"] }
+    }
+  ],
+  webServer: {
+    command: "npm run dev",
+    url: "http://localhost:3000",
+    reuseExistingServer: !process.env.CI
+  }
+})
+```
+
+### Running E2E tests
+
+```bash
+# Install browsers (first time only)
+npx playwright install --with-deps
+
+# Run E2E tests
+npm run test:e2e
+
+# Run with UI
+npx playwright test --ui
+
+# Run specific test
+npx playwright test tests/e2e/home.spec.ts
+
+# Debug mode
+npx playwright test --debug
+```
+
+## E2E test examples
+
+### Testing navigation
+
+```typescript
+// tests/e2e/home.spec.ts
+import { test, expect } from "@playwright/test"
+
+test("home page loads", async ({ page }) => {
+  await page.goto("/")
+  
+  await expect(page).toHaveTitle(/BIGPEDAL/)
+  await expect(page.locator("h1")).toContainText("BIGPEDAL")
+})
+
+test("can navigate to services", async ({ page }) => {
+  await page.goto("/")
+  await page.click("text=Services")
+  
+  await expect(page).toHaveURL("/services")
+  await expect(page.locator("h1")).toContainText("Services")
+})
+```
+
+### Testing authentication
+
+```typescript
+// tests/e2e/auth.spec.ts
+import { test, expect } from "@playwright/test"
+
+test("user can login", async ({ page }) => {
+  await page.goto("/login")
+  
+  await page.fill('input[name="email"]', "test@example.com")
+  await page.fill('input[name="password"]', "password123")
+  await page.click('button[type="submit"]')
+  
+  await expect(page).toHaveURL("/dashboard")
+  await expect(page.locator("text=Welcome")).toBeVisible()
+})
+
+test("shows error for invalid credentials", async ({ page }) => {
+  await page.goto("/login")
+  
+  await page.fill('input[name="email"]', "wrong@example.com")
+  await page.fill('input[name="password"]', "wrongpass")
+  await page.click('button[type="submit"]')
+  
+  await expect(page.locator("text=Invalid credentials")).toBeVisible()
+})
+```
+
+### Testing forms
+
+```typescript
+// tests/e2e/contact.spec.ts
+import { test, expect } from "@playwright/test"
+
+test("can submit contact form", async ({ page }) => {
+  await page.goto("/contact")
+  
+  await page.fill('input[name="name"]', "John Doe")
+  await page.fill('input[name="email"]', "john@example.com")
+  await page.fill('textarea[name="message"]', "Test message")
+  await page.click('button[type="submit"]')
+  
+  await expect(page.locator("text=Message sent")).toBeVisible()
+})
+```
+
+### Testing QES workflow
+
+```typescript
+// tests/e2e/qes.spec.ts
+import { test, expect } from "@playwright/test"
+
+test("can sign document", async ({ page }) => {
+  await page.goto("/qes")
+  
+  // Upload file
+  const fileInput = page.locator('input[type="file"]')
+  await fileInput.setInputFiles("tests/fixtures/sample.pdf")
+  
+  // Wait for upload
+  await expect(page.locator("text=Uploading")).toBeVisible()
+  await expect(page.locator("text=COMPLETED")).toBeVisible({ timeout: 10000 })
+  
+  // Download signed document
+  const downloadPromise = page.waitForEvent("download")
+  await page.click("text=Download")
+  const download = await downloadPromise
+  
+  expect(download.suggestedFilename()).toContain("signed")
+})
+```
+
+## Test coverage
+
+### Viewing coverage
+
+```bash
+# Generate coverage report
+npm run test:coverage
+
+# Open HTML report
+open coverage/index.html
+```
+
+### Coverage goals
+
+- **Statements**: > 80%
+- **Branches**: > 75%
+- **Functions**: > 80%
+- **Lines**: > 80%
+
+### Excluding files from coverage
+
+```typescript
+// vitest.config.ts
+export default defineConfig({
+  test: {
+    coverage: {
+      exclude: [
+        "**/*.config.ts",
+        "**/types/**",
+        "**/*.d.ts",
+        "**/node_modules/**"
+      ]
+    }
+  }
+})
+```
+
+## Continuous integration
+
+### GitHub Actions
+
+```yaml
+# .github/workflows/test.yml
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+          
+      - name: Install dependencies
+        run: npm ci
+        
+      - name: Run unit tests
+        run: npm run test
+        
+      - name: Run E2E tests
+        run: npm run test:e2e
+        
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage/coverage-final.json
+```
+
+## Testing best practices
+
+### Unit tests
+
+1. **Test one thing** - Each test should verify one behavior
+2. **Use descriptive names** - Test names should explain what they test
+3. **Arrange-Act-Assert** - Structure tests clearly
+4. **Mock external dependencies** - Isolate unit under test
+5. **Test edge cases** - Include boundary conditions
+6. **Keep tests fast** - Unit tests should run in milliseconds
+
+### E2E tests
+
+1. **Test user flows** - Focus on critical paths
+2. **Use data-testid** - Avoid brittle selectors
+3. **Wait for elements** - Use Playwright's auto-waiting
+4. **Clean up data** - Reset state between tests
+5. **Test across browsers** - Verify cross-browser compatibility
+6. **Keep tests independent** - Tests should not depend on each other
+
+### General
+
+1. **Write tests first** - TDD when possible
+2. **Maintain test quality** - Refactor tests like production code
+3. **Review test failures** - Don't ignore flaky tests
+4. **Document complex tests** - Add comments for clarity
+5. **Run tests locally** - Before pushing to CI
+6. **Monitor test performance** - Keep test suite fast
+
+## Debugging tests
+
+### Vitest debugging
+
+```bash
+# Run tests with verbose output
+npm run test -- --reporter=verbose
+
+# Run single test file
+npm run test tests/unit/auth.test.ts
+
+# Run tests matching pattern
+npm run test -- --grep="login"
+```
+
+### Playwright debugging
+
+```bash
+# Debug mode (opens browser)
+npx playwright test --debug
+
+# Headed mode (see browser)
+npx playwright test --headed
+
+# Slow motion
+npx playwright test --headed --slow-mo=1000
+
+# Generate trace
+npx playwright test --trace=on
+```
+
+### Visual debugging
+
+```typescript
+// Take screenshot on failure
+test("example", async ({ page }) => {
+  await page.goto("/")
+  await page.screenshot({ path: "screenshot.png" })
+})
+
+// Pause execution
+test("debug", async ({ page }) => {
+  await page.goto("/")
+  await page.pause() // Opens Playwright Inspector
+})
+```
+
+## Test data management
+
+### Fixtures
+
+```typescript
+// tests/fixtures/services.ts
+export const mockServices = [
+  {
+    id: "1",
+    title: "Passport Application",
+    category: "civil",
+    summary: "Apply for a new passport"
+  },
+  {
+    id: "2",
+    title: "Business Registration",
+    category: "business",
+    summary: "Register a new business"
+  }
+]
+```
+
+### Database seeding
+
+```typescript
+// tests/helpers/seed.ts
+import { prisma } from "@/lib/prisma"
+
+export async function seedTestData() {
+  await prisma.user.create({
+    data: {
+      email: "test@example.com",
+      name: "Test User",
+      password: "hashed-password"
+    }
+  })
+}
+
+export async function cleanupTestData() {
+  await prisma.user.deleteMany({
+    where: {
+      email: { contains: "test" }
+    }
+  })
+}
+```
+
+## Performance testing
+
+### Load testing with k6
+
+```javascript
+// tests/load/api.js
+import http from "k6/http"
+import { check, sleep } from "k6"
+
+export const options = {
+  vus: 10,
+  duration: "30s"
+}
+
+export default function () {
+  const res = http.get("http://localhost:3000/api/services")
+  
+  check(res, {
+    "status is 200": (r) => r.status === 200,
+    "response time < 500ms": (r) => r.timings.duration < 500
+  })
+  
+  sleep(1)
+}
+```
+
+Run load test:
+```bash
+k6 run tests/load/api.js
+```
+
+## Troubleshooting
+
+### Common issues
+
+**Tests fail in CI but pass locally**
+- Check environment variables
+- Verify database connection
+- Ensure consistent Node.js version
+
+**Flaky E2E tests**
+- Increase timeouts
+- Add explicit waits
+- Check for race conditions
+
+**Slow test suite**
+- Run tests in parallel
+- Mock external APIs
+- Use test database
+
+**Coverage not updating**
+- Clear coverage cache
+- Rebuild project
+- Check coverage configuration

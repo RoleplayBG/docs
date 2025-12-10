@@ -1,0 +1,558 @@
+---
+title: "Deployment"
+description: "Deploy to Vercel, configure environment variables, and set up cron jobs"
+---
+
+## Overview
+
+BIGPEDAL is optimized for deployment on Vercel with support for other platforms. This guide covers production deployment, environment configuration, and operational setup.
+
+## Vercel deployment
+
+### Prerequisites
+
+- GitHub account
+- Vercel account
+- PostgreSQL database (Railway, Supabase, Neon, or AWS RDS)
+- Google Gemini API key (optional, for AI features)
+
+### Quick deploy
+
+1. **Push to GitHub**
+   ```bash
+   git push origin main
+   ```
+
+2. **Connect to Vercel**
+   - Visit [vercel.com](https://vercel.com)
+   - Click "New Project"
+   - Import your GitHub repository
+   - Vercel will auto-detect Next.js
+
+3. **Configure environment variables**
+   - Go to Project Settings → Environment Variables
+   - Add all required variables (see below)
+
+4. **Deploy**
+   - Click "Deploy"
+   - Vercel will build and deploy automatically
+
+### Environment variables
+
+#### Required variables
+
+```bash
+# Database
+DATABASE_URL=postgresql://user:pass@host:5432/db?sslmode=require
+
+# Authentication
+NEXTAUTH_SECRET=generate-with-openssl-rand-base64-32
+NEXTAUTH_URL=https://yourdomain.com
+
+# Cron jobs
+CRON_SECRET=your-secure-random-secret
+```
+
+#### Optional variables
+
+```bash
+# AI Features
+GOOGLE_AI_API_KEY=your-gemini-api-key
+LLM_MODEL=gemini-1.5-flash
+
+# Email (for OTP and notifications)
+AUTH_OTP=off
+EMAIL_SERVER=smtp://user:pass@smtp.example.com:587
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USER=your-email@example.com
+SMTP_PASS=your-password
+SMTP_FROM=noreply@example.com
+TO_EMAIL=support@example.com
+
+# QES (Qualified Electronic Signature)
+QES_PROVIDER=demo
+EVROTRUST_API_BASE=https://api.evrotrust.com
+EVROTRUST_API_KEY=your-evrotrust-key
+VERCEL_BLOB_READ_WRITE_TOKEN=vercel_blob_...
+
+# Government services
+GOV_PROVIDER=demo
+GOV_STATUS_URL=https://status.egov.bg/api/v1/status
+EGOV_PROVIDER=demo
+
+# Redis (optional, for distributed rate limiting)
+REDIS_URL=redis://...
+
+# Admin
+ADMIN_EMAILS=admin@example.com
+
+# Feature flags
+NEXT_PUBLIC_FEATURE_QES=on
+NEXT_PUBLIC_FEATURE_REMINDERS=on
+NEXT_PUBLIC_PARTICLES=on
+```
+
+### Generating secrets
+
+```bash
+# Generate NEXTAUTH_SECRET
+openssl rand -base64 32
+
+# Generate CRON_SECRET
+openssl rand -base64 32
+```
+
+## Database setup
+
+### 1. Create PostgreSQL database
+
+**Railway:**
+```bash
+# Install Railway CLI
+npm install -g @railway/cli
+
+# Login
+railway login
+
+# Create project
+railway init
+
+# Add PostgreSQL
+railway add postgresql
+
+# Get connection string
+railway variables
+```
+
+**Supabase:**
+1. Create project at [supabase.com](https://supabase.com)
+2. Go to Settings → Database
+3. Copy connection string (use "Connection pooling" for production)
+
+**Neon:**
+1. Create project at [neon.tech](https://neon.tech)
+2. Copy connection string from dashboard
+
+### 2. Run migrations
+
+```bash
+# Set DATABASE_URL
+export DATABASE_URL="postgresql://..."
+
+# Run migrations
+npx prisma migrate deploy
+
+# Generate Prisma Client
+npx prisma generate
+```
+
+## Cron jobs
+
+### Configure in vercel.json
+
+```json
+{
+  "crons": [
+    {
+      "path": "/api/cron/reminders",
+      "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/cron/consent-expiration",
+      "schedule": "0 0 * * *"
+    }
+  ]
+}
+```
+
+### Cron schedule format
+
+```
+┌───────────── minute (0 - 59)
+│ ┌───────────── hour (0 - 23)
+│ │ ┌───────────── day of month (1 - 31)
+│ │ │ ┌───────────── month (1 - 12)
+│ │ │ │ ┌───────────── day of week (0 - 6)
+│ │ │ │ │
+* * * * *
+```
+
+Examples:
+- `0 7 * * *` - Daily at 7:00 AM UTC
+- `0 */6 * * *` - Every 6 hours
+- `0 0 * * 0` - Weekly on Sunday at midnight
+
+### Testing cron locally
+
+```bash
+curl -X POST http://localhost:3000/api/cron/reminders \
+  -H "x-cron-secret: your-cron-secret"
+```
+
+## Domain configuration
+
+### 1. Add custom domain
+
+In Vercel dashboard:
+1. Go to Project Settings → Domains
+2. Add your domain (e.g., `bigpedal.bg`)
+3. Configure DNS records as instructed
+
+### 2. DNS configuration
+
+Add these records to your DNS provider:
+
+```
+Type    Name    Value
+A       @       76.76.21.21
+CNAME   www     cname.vercel-dns.com
+```
+
+### 3. SSL certificate
+
+Vercel automatically provisions SSL certificates via Let's Encrypt.
+
+## Build configuration
+
+### next.config.ts
+
+```typescript
+import type { NextConfig } from "next"
+
+const nextConfig: NextConfig = {
+  // Output standalone for Docker
+  output: "standalone",
+  
+  // Image optimization
+  images: {
+    domains: ["blob.vercel-storage.com"],
+    formats: ["image/avif", "image/webp"]
+  },
+  
+  // Experimental features
+  experimental: {
+    serverActions: {
+      bodySizeLimit: "10mb"
+    }
+  }
+}
+
+export default nextConfig
+```
+
+## Performance optimization
+
+### Edge functions
+
+Deploy API routes to Edge for global distribution:
+
+```typescript
+// app/api/services/route.ts
+export const runtime = "edge"
+
+export async function GET(req: Request) {
+  // Edge function code
+}
+```
+
+### Static generation
+
+Pre-render service pages:
+
+```typescript
+// app/services/[id]/page.tsx
+export async function generateStaticParams() {
+  const services = await getServices()
+  
+  return services.map((service) => ({
+    id: service.id
+  }))
+}
+```
+
+### Image optimization
+
+```typescript
+import Image from "next/image"
+
+<Image
+  src="/logo.png"
+  alt="BIGPEDAL"
+  width={200}
+  height={50}
+  priority
+/>
+```
+
+## Monitoring
+
+### Vercel Analytics
+
+Automatically enabled for all Vercel deployments.
+
+View metrics:
+- Page views
+- Unique visitors
+- Top pages
+- Referrers
+
+### Speed Insights
+
+Monitor Core Web Vitals:
+- Largest Contentful Paint (LCP)
+- First Input Delay (FID)
+- Cumulative Layout Shift (CLS)
+
+### Error tracking with Sentry
+
+```bash
+# Install Sentry
+npm install @sentry/nextjs
+
+# Initialize
+npx @sentry/wizard@latest -i nextjs
+```
+
+Configure in `sentry.client.config.ts`:
+
+```typescript
+import * as Sentry from "@sentry/nextjs"
+
+Sentry.init({
+  dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
+  tracesSampleRate: 1.0,
+  environment: process.env.NODE_ENV
+})
+```
+
+## Scaling
+
+### Horizontal scaling
+
+Vercel automatically scales based on traffic:
+- Serverless functions scale to zero
+- Edge functions deployed globally
+- No configuration needed
+
+### Database scaling
+
+**Connection pooling:**
+```bash
+DATABASE_URL="postgresql://...?connection_limit=10&pool_timeout=30"
+```
+
+**Read replicas:**
+```typescript
+// lib/prisma/client.ts
+export const prismaRead = new PrismaClient({
+  datasources: {
+    db: {
+      url: process.env.DATABASE_READ_URL
+    }
+  }
+})
+```
+
+### Caching with Redis
+
+```typescript
+// lib/cache/redis.ts
+import { Redis } from "@upstash/redis"
+
+const redis = new Redis({
+  url: process.env.REDIS_URL!,
+  token: process.env.REDIS_TOKEN!
+})
+
+export async function getCached<T>(
+  key: string,
+  fetcher: () => Promise<T>,
+  ttl: number = 3600
+): Promise<T> {
+  // Try cache first
+  const cached = await redis.get(key)
+  if (cached) return cached as T
+  
+  // Fetch and cache
+  const data = await fetcher()
+  await redis.setex(key, ttl, JSON.stringify(data))
+  
+  return data
+}
+```
+
+## Alternative platforms
+
+### Docker deployment
+
+```dockerfile
+# Dockerfile
+FROM node:18-alpine AS base
+
+# Install dependencies
+FROM base AS deps
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+
+# Build application
+FROM base AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+RUN npm run build
+
+# Production image
+FROM base AS runner
+WORKDIR /app
+
+ENV NODE_ENV production
+
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 nextjs
+
+COPY --from=builder /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+USER nextjs
+
+EXPOSE 3000
+
+ENV PORT 3000
+
+CMD ["node", "server.js"]
+```
+
+Build and run:
+```bash
+docker build -t bigpedal .
+docker run -p 3000:3000 --env-file .env bigpedal
+```
+
+### AWS deployment
+
+**Using AWS Amplify:**
+1. Connect GitHub repository
+2. Configure build settings
+3. Add environment variables
+4. Deploy
+
+**Using EC2:**
+1. Launch Ubuntu instance
+2. Install Node.js and PostgreSQL
+3. Clone repository
+4. Run `npm install && npm run build`
+5. Use PM2 for process management
+
+## Backup and disaster recovery
+
+### Database backups
+
+**Automated backups:**
+```bash
+# Daily backup script
+#!/bin/bash
+DATE=$(date +%Y%m%d)
+pg_dump $DATABASE_URL | gzip > backup-$DATE.sql.gz
+
+# Upload to S3
+aws s3 cp backup-$DATE.sql.gz s3://backups/
+```
+
+**Point-in-time recovery:**
+Most managed PostgreSQL services (Railway, Supabase, Neon) provide automatic point-in-time recovery.
+
+### Application backups
+
+- **Code**: Stored in GitHub
+- **Environment variables**: Export from Vercel dashboard
+- **Database schema**: Versioned in `prisma/migrations`
+
+## Security checklist
+
+- [ ] Set strong `NEXTAUTH_SECRET`
+- [ ] Enable HTTPS (automatic on Vercel)
+- [ ] Configure CORS properly
+- [ ] Set up rate limiting
+- [ ] Enable database SSL
+- [ ] Rotate API keys regularly
+- [ ] Monitor error logs
+- [ ] Set up alerts for failures
+- [ ] Review access logs
+- [ ] Keep dependencies updated
+
+## Troubleshooting
+
+### Build failures
+
+**Check build logs:**
+```bash
+vercel logs
+```
+
+**Common issues:**
+- Missing environment variables
+- TypeScript errors
+- Database connection failures
+
+### Runtime errors
+
+**Check function logs:**
+```bash
+vercel logs --follow
+```
+
+**Common issues:**
+- Database connection timeout
+- API rate limits exceeded
+- Missing secrets
+
+### Performance issues
+
+**Analyze bundle size:**
+```bash
+npm run analyze
+```
+
+**Check database queries:**
+```typescript
+// Enable query logging
+const prisma = new PrismaClient({
+  log: ['query']
+})
+```
+
+## Post-deployment
+
+### 1. Verify deployment
+
+- [ ] Test authentication
+- [ ] Check API endpoints
+- [ ] Verify database connection
+- [ ] Test cron jobs
+- [ ] Check email delivery
+- [ ] Test QES signing
+- [ ] Verify AI chat
+
+### 2. Monitor metrics
+
+- [ ] Set up Sentry alerts
+- [ ] Monitor Vercel Analytics
+- [ ] Check database performance
+- [ ] Review error rates
+
+### 3. Documentation
+
+- [ ] Update README with production URL
+- [ ] Document environment variables
+- [ ] Create runbook for common issues
+- [ ] Share access with team
+
+## Support
+
+For deployment issues:
+- Vercel: [vercel.com/support](https://vercel.com/support)
+- GitHub Issues: Create an issue in your repository
+- Email: support@bigpedal.net

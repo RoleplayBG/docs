@@ -1,0 +1,535 @@
+---
+title: "API routes"
+description: "Comprehensive API documentation for all endpoints"
+---
+
+## Overview
+
+BIGPEDAL provides a RESTful API built with Next.js API routes. All endpoints follow standard HTTP conventions and return JSON responses.
+
+## Base URL
+
+```
+Development: http://localhost:3000/api
+Production: https://yourdomain.com/api
+```
+
+## Authentication endpoints
+
+### POST /api/auth/signin
+
+Authenticate user with credentials.
+
+**Request body:**
+```json
+{
+  "email": "user@example.com",
+  "password": "password123"
+}
+```
+
+**Response:**
+```json
+{
+  "user": {
+    "id": "user-id",
+    "email": "user@example.com",
+    "name": "John Doe",
+    "role": "USER"
+  },
+  "token": "jwt-token"
+}
+```
+
+### POST /api/auth/register
+
+Register a new user account.
+
+**Request body:**
+```json
+{
+  "email": "user@example.com",
+  "password": "password123",
+  "name": "John Doe",
+  "egn": "7523169263"
+}
+```
+
+**Response:**
+```json
+{
+  "user": {
+    "id": "user-id",
+    "email": "user@example.com",
+    "name": "John Doe"
+  }
+}
+```
+
+### POST /api/auth/otp/request
+
+Request OTP code for email verification.
+
+**Request body:**
+```json
+{
+  "email": "user@example.com"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "OTP sent to email"
+}
+```
+
+### POST /api/auth/otp/verify
+
+Verify OTP code.
+
+**Request body:**
+```json
+{
+  "email": "user@example.com",
+  "code": "123456"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "token": "jwt-token"
+}
+```
+
+## Service endpoints
+
+### GET /api/services
+
+Get all available government services.
+
+**Query parameters:**
+- `category` (optional) - Filter by category
+- `search` (optional) - Search query
+- `limit` (optional) - Number of results (default: 20)
+- `offset` (optional) - Pagination offset
+
+**Response:**
+```json
+{
+  "services": [
+    {
+      "id": "service-id",
+      "slug": "service-slug",
+      "title": "Service Title",
+      "summary": "Brief description",
+      "category": "civil",
+      "agency": "Government Agency",
+      "steps": [...],
+      "links": [...]
+    }
+  ],
+  "total": 117,
+  "limit": 20,
+  "offset": 0
+}
+```
+
+### GET /api/services/[id]
+
+Get service details by ID.
+
+**Response:**
+```json
+{
+  "id": "service-id",
+  "slug": "service-slug",
+  "title": "Service Title",
+  "summary": "Brief description",
+  "category": "civil",
+  "agency": "Government Agency",
+  "steps": [
+    {
+      "id": "step-1",
+      "title": "Step Title",
+      "description": "Step description",
+      "documents": ["Document 1", "Document 2"]
+    }
+  ],
+  "links": [
+    {
+      "label": "Official Website",
+      "href": "https://example.gov.bg"
+    }
+  ]
+}
+```
+
+### POST /api/services/[id]/apply
+
+Submit application for a service.
+
+**Request body:**
+```json
+{
+  "serviceId": "service-id",
+  "data": {
+    "field1": "value1",
+    "field2": "value2"
+  },
+  "documents": ["document-id-1", "document-id-2"]
+}
+```
+
+**Response:**
+```json
+{
+  "applicationId": "app-id",
+  "status": "PENDING",
+  "submittedAt": "2024-01-01T00:00:00Z"
+}
+```
+
+### GET /api/services/categories
+
+Get all service categories.
+
+**Response:**
+```json
+{
+  "categories": [
+    {
+      "slug": "civil",
+      "name": "Civil services",
+      "count": 25
+    },
+    {
+      "slug": "business",
+      "name": "Business services",
+      "count": 42
+    }
+  ]
+}
+```
+
+## AI endpoints
+
+### POST /api/ai
+
+Chat with CivicAI assistant.
+
+**Request body:**
+```json
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "How do I apply for a passport?"
+    }
+  ]
+}
+```
+
+**Response (streaming):**
+```
+data: {"content": "To apply for a passport, you need to..."}
+data: {"content": " follow these steps:"}
+data: [DONE]
+```
+
+### POST /api/documents/analyze
+
+Analyze uploaded document with AI.
+
+**Request body (multipart/form-data):**
+```
+file: [PDF or image file]
+```
+
+**Response:**
+```json
+{
+  "summary": "Document summary",
+  "extractedData": {
+    "name": "John Doe",
+    "date": "2024-01-01",
+    "amount": "1000"
+  },
+  "confidence": 0.95
+}
+```
+
+## QES endpoints
+
+### POST /api/qes/upload
+
+Upload document for signing.
+
+**Request body (multipart/form-data):**
+```
+file: [PDF file]
+title: "Document title"
+```
+
+**Response:**
+```json
+{
+  "jobId": "job-id",
+  "status": "PENDING",
+  "uploadedAt": "2024-01-01T00:00:00Z"
+}
+```
+
+### GET /api/qes/jobs/[id]
+
+Get signing job status.
+
+**Response:**
+```json
+{
+  "id": "job-id",
+  "status": "COMPLETED",
+  "documentUrl": "https://blob.vercel-storage.com/...",
+  "signedUrl": "https://blob.vercel-storage.com/...",
+  "createdAt": "2024-01-01T00:00:00Z",
+  "completedAt": "2024-01-01T00:05:00Z"
+}
+```
+
+### GET /api/qes/jobs/[id]/download
+
+Download signed document.
+
+**Response:**
+Binary PDF file with `Content-Disposition: attachment` header.
+
+### POST /api/qes/webhook
+
+Webhook endpoint for QES provider callbacks.
+
+**Headers:**
+```
+x-webhook-signature: signature-hash
+```
+
+**Request body:**
+```json
+{
+  "jobId": "job-id",
+  "status": "COMPLETED",
+  "signedDocumentUrl": "https://..."
+}
+```
+
+## Consent endpoints
+
+### GET /api/consent/user
+
+Get user's consent records.
+
+**Response:**
+```json
+{
+  "consents": [
+    {
+      "id": "consent-id",
+      "purposeId": "purpose-id",
+      "purpose": "Data processing for service X",
+      "granted": true,
+      "grantedAt": "2024-01-01T00:00:00Z",
+      "expiresAt": "2025-01-01T00:00:00Z"
+    }
+  ]
+}
+```
+
+### POST /api/consent/grant
+
+Grant consent for data processing.
+
+**Request body:**
+```json
+{
+  "purposeId": "purpose-id",
+  "duration": 365
+}
+```
+
+**Response:**
+```json
+{
+  "consentId": "consent-id",
+  "granted": true,
+  "expiresAt": "2025-01-01T00:00:00Z"
+}
+```
+
+### POST /api/consent/revoke
+
+Revoke previously granted consent.
+
+**Request body:**
+```json
+{
+  "consentId": "consent-id"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "revokedAt": "2024-01-01T00:00:00Z"
+}
+```
+
+## Admin endpoints
+
+### GET /api/admin/applications
+
+Get all applications (admin only).
+
+**Query parameters:**
+- `status` (optional) - Filter by status
+- `limit` (optional) - Number of results
+- `offset` (optional) - Pagination offset
+
+**Response:**
+```json
+{
+  "applications": [
+    {
+      "id": "app-id",
+      "userId": "user-id",
+      "serviceId": "service-id",
+      "status": "PENDING",
+      "submittedAt": "2024-01-01T00:00:00Z"
+    }
+  ],
+  "total": 150
+}
+```
+
+### GET /api/admin/waitlist
+
+Get waitlist entries (admin only).
+
+**Response:**
+```json
+{
+  "entries": [
+    {
+      "id": "entry-id",
+      "email": "user@example.com",
+      "createdAt": "2024-01-01T00:00:00Z"
+    }
+  ]
+}
+```
+
+### GET /api/admin/waitlist/export
+
+Export waitlist as CSV (admin only).
+
+**Response:**
+CSV file with `Content-Type: text/csv` header.
+
+## Cron endpoints
+
+### POST /api/cron/reminders
+
+Trigger reminder email job (secured with CRON_SECRET).
+
+**Headers:**
+```
+x-cron-secret: your-cron-secret
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "remindersSent": 15
+}
+```
+
+### POST /api/cron/consent-expiration
+
+Check and notify about expiring consents.
+
+**Headers:**
+```
+x-cron-secret: your-cron-secret
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "notificationsSent": 8
+}
+```
+
+## Error responses
+
+All endpoints return standard error responses:
+
+```json
+{
+  "error": "Error message",
+  "code": "ERROR_CODE",
+  "details": {}
+}
+```
+
+### Common error codes
+
+- `UNAUTHORIZED` (401) - Authentication required
+- `FORBIDDEN` (403) - Insufficient permissions
+- `NOT_FOUND` (404) - Resource not found
+- `VALIDATION_ERROR` (400) - Invalid request data
+- `RATE_LIMIT_EXCEEDED` (429) - Too many requests
+- `INTERNAL_ERROR` (500) - Server error
+
+## Rate limiting
+
+API endpoints are rate limited:
+
+- **Authentication**: 5 requests per 15 minutes per IP
+- **General API**: 100 requests per minute per user
+- **AI endpoints**: 20 requests per minute per user
+- **QES endpoints**: 10 requests per hour per user
+
+Rate limit headers:
+```
+X-RateLimit-Limit: 100
+X-RateLimit-Remaining: 95
+X-RateLimit-Reset: 1640000000
+```
+
+## Testing API endpoints
+
+### Using cURL
+
+```bash
+# Login
+curl -X POST http://localhost:3000/api/auth/signin \
+  -H "Content-Type: application/json" \
+  -d '{"email":"test@example.com","password":"password123"}'
+
+# Get services
+curl http://localhost:3000/api/services?category=civil
+
+# Chat with AI
+curl -X POST http://localhost:3000/api/ai \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -d '{"messages":[{"role":"user","content":"Hello"}]}'
+```
+
+### Using Postman
+
+Import the OpenAPI specification from `/docs/api/service-navigator-openapi.yaml` for a complete Postman collection.

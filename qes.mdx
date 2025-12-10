@@ -1,0 +1,549 @@
+---
+title: "QES integration"
+description: "Qualified Electronic Signature with Evrotrust"
+---
+
+## Overview
+
+BIGPEDAL integrates Qualified Electronic Signature (QES) capabilities through Evrotrust, allowing citizens to digitally sign documents with legal validity equivalent to handwritten signatures.
+
+## Features
+
+- **Async signing workflow** - Upload, sign, and download documents
+- **Multiple providers** - Evrotrust (production) and demo (development)
+- **Document storage** - Secure storage with Vercel Blob
+- **Status tracking** - Real-time job status updates
+- **Webhook support** - Receive signing completion notifications
+
+## Configuration
+
+### Environment variables
+
+```bash
+# QES Provider
+QES_PROVIDER=demo  # Options: demo | evrotrust
+
+# Evrotrust Configuration (required when QES_PROVIDER=evrotrust)
+EVROTRUST_API_BASE=https://api.evrotrust.com
+EVROTRUST_API_KEY=your-evrotrust-api-key
+
+# Vercel Blob Storage (required for document uploads)
+VERCEL_BLOB_READ_WRITE_TOKEN=vercel_blob_...
+```
+
+### Feature flag
+
+```bash
+# Enable/disable QES feature
+NEXT_PUBLIC_FEATURE_QES=on
+```
+
+## Signing workflow
+
+### 1. Upload document
+
+```typescript
+// Client-side
+const formData = new FormData()
+formData.append("file", pdfFile)
+formData.append("title", "Contract Agreement")
+
+const response = await fetch("/api/qes/upload", {
+  method: "POST",
+  body: formData
+})
+
+const { jobId } = await response.json()
+```
+
+### 2. Check status
+
+```typescript
+// Poll for status updates
+const checkStatus = async (jobId: string) => {
+  const response = await fetch(`/api/qes/jobs/${jobId}`)
+  const job = await response.json()
+  
+  return job.status // PENDING | PROCESSING | COMPLETED | FAILED
+}
+
+// Poll every 5 seconds
+const interval = setInterval(async () => {
+  const status = await checkStatus(jobId)
+  
+  if (status === "COMPLETED" || status === "FAILED") {
+    clearInterval(interval)
+  }
+}, 5000)
+```
+
+### 3. Download signed document
+
+```typescript
+// Download when completed
+const downloadSigned = async (jobId: string) => {
+  const response = await fetch(`/api/qes/jobs/${jobId}/download`)
+  const blob = await response.blob()
+  
+  // Create download link
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = "signed-document.pdf"
+  a.click()
+}
+```
+
+## API endpoints
+
+### POST /api/qes/upload
+
+Upload document for signing.
+
+**Request (multipart/form-data):**
+```
+file: [PDF file]
+title: "Document title"
+```
+
+**Response:**
+```json
+{
+  "jobId": "job-123",
+  "status": "PENDING",
+  "uploadedAt": "2024-01-01T00:00:00Z"
+}
+```
+
+### GET /api/qes/jobs/[id]
+
+Get signing job status.
+
+**Response:**
+```json
+{
+  "id": "job-123",
+  "title": "Contract Agreement",
+  "status": "COMPLETED",
+  "documentUrl": "https://blob.vercel-storage.com/original.pdf",
+  "signedUrl": "https://blob.vercel-storage.com/signed.pdf",
+  "provider": "evrotrust",
+  "createdAt": "2024-01-01T00:00:00Z",
+  "completedAt": "2024-01-01T00:05:00Z"
+}
+```
+
+### GET /api/qes/jobs/[id]/download
+
+Download signed document.
+
+**Response:**
+Binary PDF file with headers:
+```
+Content-Type: application/pdf
+Content-Disposition: attachment; filename="signed-document.pdf"
+```
+
+### POST /api/qes/webhook
+
+Webhook endpoint for provider callbacks.
+
+**Headers:**
+```
+x-webhook-signature: hmac-sha256-signature
+```
+
+**Request body:**
+```json
+{
+  "jobId": "job-123",
+  "status": "COMPLETED",
+  "signedDocumentUrl": "https://evrotrust.com/signed/..."
+}
+```
+
+## Provider implementations
+
+### Demo provider
+
+For development and testing:
+
+```typescript
+// lib/qes/providers/demo.ts
+export class DemoQESProvider implements QESProvider {
+  async sign(documentUrl: string): Promise<QESJob> {
+    // Simulate signing delay
+    await new Promise(resolve => setTimeout(resolve, 3000))
+    
+    return {
+      id: generateId(),
+      status: "COMPLETED",
+      signedUrl: documentUrl, // Return original for demo
+      completedAt: new Date()
+    }
+  }
+  
+  async getStatus(jobId: string): Promise<QESStatus> {
+    return "COMPLETED"
+  }
+}
+```
+
+### Evrotrust provider
+
+For production use:
+
+```typescript
+// lib/qes/providers/evrotrust.ts
+export class EvrotrustQESProvider implements QESProvider {
+  private apiBase: string
+  private apiKey: string
+  
+  constructor() {
+    this.apiBase = process.env.EVROTRUST_API_BASE!
+    this.apiKey = process.env.EVROTRUST_API_KEY!
+  }
+  
+  async sign(documentUrl: string): Promise<QESJob> {
+    const response = await fetch(`${this.apiBase}/sign`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${this.apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        documentUrl,
+        signatureType: "QUALIFIED"
+      })
+    })
+    
+    const data = await response.json()
+    
+    return {
+      id: data.jobId,
+      status: "PROCESSING",
+      providerJobId: data.jobId
+    }
+  }
+  
+  async getStatus(providerJobId: string): Promise<QESStatus> {
+    const response = await fetch(
+      `${this.apiBase}/jobs/${providerJobId}`,
+      {
+        headers: {
+          "Authorization": `Bearer ${this.apiKey}`
+        }
+      }
+    )
+    
+    const data = await response.json()
+    return this.mapStatus(data.status)
+  }
+  
+  private mapStatus(providerStatus: string): QESStatus {
+    const statusMap: Record<string, QESStatus> = {
+      "pending": "PENDING",
+      "processing": "PROCESSING",
+      "completed": "COMPLETED",
+      "failed": "FAILED"
+    }
+    
+    return statusMap[providerStatus] || "PENDING"
+  }
+}
+```
+
+## Document storage
+
+### Upload to Vercel Blob
+
+```typescript
+// lib/qes/storage.ts
+import { put } from "@vercel/blob"
+
+export async function uploadDocument(
+  file: File,
+  userId: string
+): Promise<string> {
+  const blob = await put(
+    `qes/${userId}/${file.name}`,
+    file,
+    {
+      access: "public",
+      addRandomSuffix: true
+    }
+  )
+  
+  return blob.url
+}
+```
+
+### Download from Vercel Blob
+
+```typescript
+export async function downloadDocument(url: string): Promise<Blob> {
+  const response = await fetch(url)
+  return await response.blob()
+}
+```
+
+## Database schema
+
+```prisma
+model QESJob {
+  id              String    @id @default(cuid())
+  userId          String
+  title           String
+  documentUrl     String
+  signedUrl       String?
+  status          QESStatus @default(PENDING)
+  provider        String    @default("demo")
+  providerJobId   String?
+  createdAt       DateTime  @default(now())
+  completedAt     DateTime?
+  
+  user            User      @relation(fields: [userId], references: [id])
+  
+  @@index([userId])
+  @@index([status])
+}
+
+enum QESStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+```
+
+## Webhook handling
+
+### Verify signature
+
+```typescript
+// lib/qes/webhook.ts
+import crypto from "crypto"
+
+export function verifyWebhookSignature(
+  payload: string,
+  signature: string,
+  secret: string
+): boolean {
+  const expectedSignature = crypto
+    .createHmac("sha256", secret)
+    .update(payload)
+    .digest("hex")
+  
+  return crypto.timingSafeEqual(
+    Buffer.from(signature),
+    Buffer.from(expectedSignature)
+  )
+}
+```
+
+### Process webhook
+
+```typescript
+// app/api/qes/webhook/route.ts
+export async function POST(req: Request) {
+  const signature = req.headers.get("x-webhook-signature")
+  const payload = await req.text()
+  
+  // Verify signature
+  if (!verifyWebhookSignature(payload, signature!, WEBHOOK_SECRET)) {
+    return NextResponse.json(
+      { error: "Invalid signature" },
+      { status: 401 }
+    )
+  }
+  
+  const data = JSON.parse(payload)
+  
+  // Update job status
+  await prisma.qESJob.update({
+    where: { id: data.jobId },
+    data: {
+      status: data.status,
+      signedUrl: data.signedDocumentUrl,
+      completedAt: data.status === "COMPLETED" ? new Date() : null
+    }
+  })
+  
+  return NextResponse.json({ success: true })
+}
+```
+
+## UI components
+
+### Document upload
+
+```typescript
+// components/qes/DocumentUpload.tsx
+"use client"
+import { useState } from "react"
+import { useDropzone } from "react-dropzone"
+
+export function DocumentUpload() {
+  const [uploading, setUploading] = useState(false)
+  
+  const { getRootProps, getInputProps } = useDropzone({
+    accept: { "application/pdf": [".pdf"] },
+    maxFiles: 1,
+    onDrop: async (files) => {
+      setUploading(true)
+      
+      const formData = new FormData()
+      formData.append("file", files[0])
+      formData.append("title", files[0].name)
+      
+      const response = await fetch("/api/qes/upload", {
+        method: "POST",
+        body: formData
+      })
+      
+      const { jobId } = await response.json()
+      
+      // Redirect to status page
+      window.location.href = `/qes/jobs/${jobId}`
+    }
+  })
+  
+  return (
+    <div {...getRootProps()} className="border-2 border-dashed p-8">
+      <input {...getInputProps()} />
+      {uploading ? (
+        <p>Uploading...</p>
+      ) : (
+        <p>Drop PDF file here or click to select</p>
+      )}
+    </div>
+  )
+}
+```
+
+### Signing status
+
+```typescript
+// components/qes/SigningStatus.tsx
+"use client"
+import { useEffect, useState } from "react"
+
+export function SigningStatus({ jobId }: { jobId: string }) {
+  const [job, setJob] = useState<QESJob | null>(null)
+  
+  useEffect(() => {
+    const fetchStatus = async () => {
+      const response = await fetch(`/api/qes/jobs/${jobId}`)
+      const data = await response.json()
+      setJob(data)
+    }
+    
+    // Poll every 5 seconds
+    const interval = setInterval(fetchStatus, 5000)
+    fetchStatus()
+    
+    return () => clearInterval(interval)
+  }, [jobId])
+  
+  if (!job) return <div>Loading...</div>
+  
+  return (
+    <div>
+      <h2>{job.title}</h2>
+      <p>Status: {job.status}</p>
+      
+      {job.status === "COMPLETED" && (
+        <a href={`/api/qes/jobs/${jobId}/download`}>
+          Download signed document
+        </a>
+      )}
+    </div>
+  )
+}
+```
+
+## Security considerations
+
+1. **Validate file types** - Only accept PDF files
+2. **Scan for malware** - Integrate virus scanning
+3. **Limit file size** - Max 10MB per document
+4. **Authenticate users** - Require login for signing
+5. **Verify webhooks** - Check signature on callbacks
+6. **Encrypt storage** - Use encrypted blob storage
+7. **Audit logging** - Log all signing operations
+8. **Rate limiting** - Prevent abuse
+
+## Testing
+
+### Unit tests
+
+```typescript
+// tests/unit/qes/demo-provider.test.ts
+import { DemoQESProvider } from "@/lib/qes/providers/demo"
+
+describe("DemoQESProvider", () => {
+  it("completes signing", async () => {
+    const provider = new DemoQESProvider()
+    const job = await provider.sign("https://example.com/doc.pdf")
+    
+    expect(job.status).toBe("COMPLETED")
+    expect(job.signedUrl).toBeDefined()
+  })
+})
+```
+
+### E2E tests
+
+```typescript
+// tests/e2e/qes.spec.ts
+import { test, expect } from "@playwright/test"
+
+test("user can sign document", async ({ page }) => {
+  await page.goto("/qes")
+  
+  // Upload file
+  const fileInput = page.locator('input[type="file"]')
+  await fileInput.setInputFiles("tests/fixtures/sample.pdf")
+  
+  // Wait for upload
+  await expect(page.locator("text=Uploading")).toBeVisible()
+  await expect(page.locator("text=COMPLETED")).toBeVisible()
+  
+  // Download signed document
+  const downloadPromise = page.waitForEvent("download")
+  await page.click("text=Download")
+  const download = await downloadPromise
+  
+  expect(download.suggestedFilename()).toContain("signed")
+})
+```
+
+## Troubleshooting
+
+### Common issues
+
+**Upload fails**
+- Check file size (max 10MB)
+- Verify file type is PDF
+- Ensure `VERCEL_BLOB_READ_WRITE_TOKEN` is set
+
+**Signing stuck in PROCESSING**
+- Check Evrotrust API credentials
+- Verify webhook endpoint is accessible
+- Check provider status manually
+
+**Download fails**
+- Ensure job status is COMPLETED
+- Verify signed document URL is valid
+- Check blob storage permissions
+
+## Best practices
+
+1. **Use demo provider** for development
+2. **Implement retry logic** for failed signings
+3. **Store metadata** about signed documents
+4. **Notify users** when signing completes
+5. **Archive old jobs** after 90 days
+6. **Monitor costs** for blob storage
+7. **Test webhook handling** thoroughly
+8. **Provide clear UI feedback** during signing

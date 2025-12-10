@@ -1,0 +1,375 @@
+---
+title: "Authentication"
+description: "NextAuth.js authentication with OTP and rate limiting"
+---
+
+## Overview
+
+BIGPEDAL uses NextAuth.js for authentication with support for credentials-based login, optional email OTP verification, and comprehensive rate limiting.
+
+## Authentication flow
+
+### Standard login
+
+1. User enters email and password
+2. Credentials validated against Prisma database
+3. Password verified using bcrypt
+4. JWT session token issued
+5. User redirected to dashboard
+
+### OTP-enhanced login
+
+When `AUTH_OTP=on` is set:
+
+1. User enters email and password
+2. Initial credentials validated
+3. OTP code sent via email
+4. User enters 6-digit OTP code
+5. OTP verified and session created
+
+## Configuration
+
+### Environment variables
+
+```bash
+# Required
+NEXTAUTH_SECRET=your-secret-here
+NEXTAUTH_URL=http://localhost:3000
+
+# Optional OTP
+AUTH_OTP=off  # Set to 'on' to enable
+
+# Email for OTP delivery
+EMAIL_SERVER=smtp://user:pass@smtp.example.com:587
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USER=your-email@example.com
+SMTP_PASS=your-password
+SMTP_FROM=noreply@example.com
+```
+
+### NextAuth configuration
+
+Located in `lib/auth/options.ts`:
+
+```typescript
+export const authOptions: NextAuthOptions = {
+  adapter: PrismaAdapter(prisma),
+  providers: [
+    CredentialsProvider({
+      name: "Credentials",
+      credentials: {
+        email: { label: "Email", type: "email" },
+        password: { label: "Password", type: "password" }
+      },
+      async authorize(credentials) {
+        // Validate credentials
+        // Return user object or null
+      }
+    })
+  ],
+  session: {
+    strategy: "jwt",
+    maxAge: 30 * 24 * 60 * 60 // 30 days
+  },
+  pages: {
+    signIn: "/login",
+    error: "/login"
+  }
+}
+```
+
+## Rate limiting
+
+### IP-based rate limiting
+
+Protects against brute force attacks:
+
+```typescript
+// lib/auth/rate-limit.ts
+const rateLimiter = new RateLimiter({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // 5 attempts per window
+  keyGenerator: (req) => req.ip
+})
+```
+
+### EGN-based rate limiting
+
+Additional protection for Bulgarian national ID (EGN):
+
+```typescript
+const egnRateLimiter = new RateLimiter({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 10, // 10 attempts per hour per EGN
+  keyGenerator: (req) => req.body.egn
+})
+```
+
+## User registration
+
+### Registration flow
+
+1. User submits registration form
+2. EGN validated (Bulgarian national ID)
+3. Email uniqueness checked
+4. Password hashed with bcrypt
+5. User record created in database
+6. Automatic login after registration
+
+### EGN validation
+
+```typescript
+// lib/validations/egn.ts
+export function validateEGN(egn: string): boolean {
+  if (egn.length !== 10) return false
+  
+  // Validate checksum
+  const weights = [2, 4, 8, 5, 10, 9, 7, 3, 6]
+  let sum = 0
+  
+  for (let i = 0; i < 9; i++) {
+    sum += parseInt(egn[i]) * weights[i]
+  }
+  
+  const checksum = sum % 11
+  const lastDigit = parseInt(egn[9])
+  
+  return checksum === 10 ? lastDigit === 0 : checksum === lastDigit
+}
+```
+
+## OTP implementation
+
+### Generating OTP codes
+
+```typescript
+// lib/auth/otp.ts
+export function generateOTP(): string {
+  return Math.floor(100000 + Math.random() * 900000).toString()
+}
+
+export async function sendOTP(email: string, code: string) {
+  await sendEmail({
+    to: email,
+    subject: "Your verification code",
+    html: `Your code is: <strong>${code}</strong>`
+  })
+}
+```
+
+### OTP verification
+
+```typescript
+// app/api/auth/otp/verify/route.ts
+export async function POST(req: Request) {
+  const { email, code } = await req.json()
+  
+  // Retrieve stored OTP from database
+  const storedOTP = await prisma.otp.findFirst({
+    where: {
+      email,
+      code,
+      expiresAt: { gt: new Date() }
+    }
+  })
+  
+  if (!storedOTP) {
+    return NextResponse.json(
+      { error: "Invalid or expired code" },
+      { status: 400 }
+    )
+  }
+  
+  // Delete used OTP
+  await prisma.otp.delete({ where: { id: storedOTP.id } })
+  
+  return NextResponse.json({ success: true })
+}
+```
+
+## Session management
+
+### JWT tokens
+
+Sessions are stored as JWT tokens with the following claims:
+
+```typescript
+interface SessionToken {
+  sub: string        // User ID
+  email: string      // User email
+  name: string       // User name
+  role: string       // User role (USER, ADMIN)
+  iat: number        // Issued at
+  exp: number        // Expiration
+}
+```
+
+### Accessing session
+
+In server components:
+
+```typescript
+import { getServerSession } from "next-auth"
+import { authOptions } from "@/lib/auth/options"
+
+export default async function Page() {
+  const session = await getServerSession(authOptions)
+  
+  if (!session) {
+    redirect("/login")
+  }
+  
+  return <div>Welcome {session.user.name}</div>
+}
+```
+
+In client components:
+
+```typescript
+"use client"
+import { useSession } from "next-auth/react"
+
+export default function Component() {
+  const { data: session, status } = useSession()
+  
+  if (status === "loading") return <div>Loading...</div>
+  if (!session) return <div>Not authenticated</div>
+  
+  return <div>Welcome {session.user.name}</div>
+}
+```
+
+## Role-based access control
+
+### User roles
+
+- `USER` - Standard citizen account
+- `ADMIN` - Administrative access
+
+### Protecting routes
+
+Server-side protection:
+
+```typescript
+// app/admin/page.tsx
+import { getServerSession } from "next-auth"
+import { authOptions } from "@/lib/auth/options"
+
+export default async function AdminPage() {
+  const session = await getServerSession(authOptions)
+  
+  if (!session || session.user.role !== "ADMIN") {
+    redirect("/")
+  }
+  
+  return <div>Admin panel</div>
+}
+```
+
+API route protection:
+
+```typescript
+// app/api/admin/route.ts
+import { getServerSession } from "next-auth"
+import { authOptions } from "@/lib/auth/options"
+
+export async function GET(req: Request) {
+  const session = await getServerSession(authOptions)
+  
+  if (!session || session.user.role !== "ADMIN") {
+    return NextResponse.json(
+      { error: "Unauthorized" },
+      { status: 401 }
+    )
+  }
+  
+  // Admin logic here
+}
+```
+
+## Security best practices
+
+### Password requirements
+
+- Minimum 8 characters
+- At least one uppercase letter
+- At least one lowercase letter
+- At least one number
+- At least one special character
+
+### Password hashing
+
+```typescript
+import bcrypt from "bcryptjs"
+
+// Hash password
+const hashedPassword = await bcrypt.hash(password, 10)
+
+// Verify password
+const isValid = await bcrypt.compare(password, hashedPassword)
+```
+
+### CSRF protection
+
+NextAuth automatically includes CSRF tokens in forms. For custom forms:
+
+```typescript
+import { getCsrfToken } from "next-auth/react"
+
+const csrfToken = await getCsrfToken()
+```
+
+## Testing authentication
+
+### Unit tests
+
+```typescript
+// tests/unit/auth.test.ts
+import { validateEGN } from "@/lib/validations/egn"
+
+describe("EGN validation", () => {
+  it("validates correct EGN", () => {
+    expect(validateEGN("7523169263")).toBe(true)
+  })
+  
+  it("rejects invalid EGN", () => {
+    expect(validateEGN("1234567890")).toBe(false)
+  })
+})
+```
+
+### E2E tests
+
+```typescript
+// tests/e2e/auth.spec.ts
+import { test, expect } from "@playwright/test"
+
+test("user can login", async ({ page }) => {
+  await page.goto("/login")
+  await page.fill('input[name="email"]', "test@example.com")
+  await page.fill('input[name="password"]', "password123")
+  await page.click('button[type="submit"]')
+  
+  await expect(page).toHaveURL("/dashboard")
+})
+```
+
+## Troubleshooting
+
+### Common issues
+
+**OTP not received**
+- Check SMTP configuration
+- Verify email server credentials
+- Check spam folder
+
+**Rate limit exceeded**
+- Wait for rate limit window to expire
+- Check IP address for multiple failed attempts
+- Clear Redis cache if using distributed rate limiting
+
+**Session expired**
+- Sessions expire after 30 days
+- User must log in again
+- Check `NEXTAUTH_SECRET` is consistent across deployments

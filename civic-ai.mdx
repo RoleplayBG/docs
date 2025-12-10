@@ -1,0 +1,444 @@
+---
+title: "CivicAI assistant"
+description: "AI-powered chatbot using Google Gemini for policy questions"
+---
+
+## Overview
+
+CivicAI is an AI-powered assistant that helps Bulgarian citizens navigate government services, understand policies, and get answers to administrative questions using Google Gemini.
+
+## Features
+
+- **Natural language understanding** - Ask questions in Bulgarian or English
+- **Policy search** - RAG-powered search through government documentation
+- **Document analysis** - Extract information from uploaded documents
+- **Service recommendations** - Suggest relevant government services
+- **Multi-turn conversations** - Maintain context across messages
+
+## Configuration
+
+### Environment variables
+
+```bash
+# Required
+GOOGLE_AI_API_KEY=your-gemini-api-key
+
+# Optional
+LLM_MODEL=gemini-1.5-flash  # Default model
+```
+
+### Supported models
+
+- `gemini-1.5-flash` (default) - Fast, cost-effective
+- `gemini-1.5-pro` - More capable, higher cost
+- `gemini-2.0-flash-exp` - Experimental features
+
+## API endpoint
+
+### POST /api/ai
+
+Chat with CivicAI assistant.
+
+**Request:**
+```json
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "How do I apply for a passport?"
+    }
+  ]
+}
+```
+
+**Response (streaming):**
+```
+data: {"content": "To apply for a passport"}
+data: {"content": ", you need to:"}
+data: {"content": "\n\n1. Visit your local police station"}
+data: [DONE]
+```
+
+## Implementation
+
+### Client-side usage
+
+```typescript
+"use client"
+import { useChat } from "ai/react"
+
+export function ChatComponent() {
+  const { messages, input, handleInputChange, handleSubmit } = useChat({
+    api: "/api/ai"
+  })
+  
+  return (
+    <div>
+      {messages.map(m => (
+        <div key={m.id}>
+          <strong>{m.role}:</strong> {m.content}
+        </div>
+      ))}
+      
+      <form onSubmit={handleSubmit}>
+        <input
+          value={input}
+          onChange={handleInputChange}
+          placeholder="Ask a question..."
+        />
+        <button type="submit">Send</button>
+      </form>
+    </div>
+  )
+}
+```
+
+### Server-side implementation
+
+```typescript
+// app/api/ai/route.ts
+import { GoogleGenerativeAI } from "@google/generative-ai"
+import { streamText } from "ai"
+
+const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY!)
+
+export async function POST(req: Request) {
+  const { messages } = await req.json()
+  
+  const model = genAI.getGenerativeModel({
+    model: "gemini-1.5-flash"
+  })
+  
+  const result = await streamText({
+    model,
+    messages,
+    system: CIVIC_AI_SYSTEM_PROMPT
+  })
+  
+  return result.toAIStreamResponse()
+}
+```
+
+## System prompt
+
+CivicAI uses a specialized system prompt for government services:
+
+```typescript
+const CIVIC_AI_SYSTEM_PROMPT = `
+You are CivicAI, an AI assistant for Bulgarian government services.
+
+Your role:
+- Help citizens navigate e-government services
+- Explain administrative procedures clearly
+- Provide accurate information about documents and requirements
+- Suggest relevant services based on user needs
+- Answer in the user's language (Bulgarian or English)
+
+Guidelines:
+- Be concise and practical
+- Cite official sources when possible
+- Admit when you don't know something
+- Suggest contacting authorities for complex cases
+- Use simple language, avoid bureaucratic jargon
+
+Available services:
+- Civil services (birth certificates, ID cards, passports)
+- Business services (company registration, licenses)
+- Traffic services (driver's licenses, vehicle registration)
+- And 14 other categories with 117 total services
+`
+```
+
+## RAG (Retrieval Augmented Generation)
+
+### Policy search
+
+CivicAI uses Fuse.js for fuzzy search through policy documents:
+
+```typescript
+// lib/rag/policy-search.ts
+import Fuse from "fuse.js"
+
+const policies = [
+  {
+    id: "policy-1",
+    title: "Passport application procedure",
+    content: "To apply for a passport, you need..."
+  },
+  // More policies...
+]
+
+const fuse = new Fuse(policies, {
+  keys: ["title", "content"],
+  threshold: 0.3
+})
+
+export function searchPolicies(query: string) {
+  return fuse.search(query).map(result => result.item)
+}
+```
+
+### Enhanced responses
+
+```typescript
+// app/api/ai/route.ts
+import { searchPolicies } from "@/lib/rag/policy-search"
+
+export async function POST(req: Request) {
+  const { messages } = await req.json()
+  const lastMessage = messages[messages.length - 1].content
+  
+  // Search relevant policies
+  const relevantPolicies = searchPolicies(lastMessage)
+  
+  // Add context to prompt
+  const enhancedPrompt = `
+    ${CIVIC_AI_SYSTEM_PROMPT}
+    
+    Relevant information:
+    ${relevantPolicies.map(p => p.content).join("\n\n")}
+  `
+  
+  // Generate response with context
+  const result = await streamText({
+    model,
+    messages,
+    system: enhancedPrompt
+  })
+  
+  return result.toAIStreamResponse()
+}
+```
+
+## Document analysis
+
+### Upload and analyze
+
+```typescript
+// app/api/documents/analyze/route.ts
+import { GoogleGenerativeAI } from "@google/generative-ai"
+import { PDFDocument } from "pdf-lib"
+
+export async function POST(req: Request) {
+  const formData = await req.formData()
+  const file = formData.get("file") as File
+  
+  // Extract text from PDF
+  const arrayBuffer = await file.arrayBuffer()
+  const pdfDoc = await PDFDocument.load(arrayBuffer)
+  const text = await extractTextFromPDF(pdfDoc)
+  
+  // Analyze with Gemini
+  const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY!)
+  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" })
+  
+  const result = await model.generateContent([
+    {
+      text: `Analyze this document and extract key information:\n\n${text}`
+    }
+  ])
+  
+  return NextResponse.json({
+    summary: result.response.text(),
+    extractedData: parseExtractedData(result.response.text())
+  })
+}
+```
+
+### Structured extraction
+
+```typescript
+const EXTRACTION_PROMPT = `
+Extract the following information from the document:
+- Full name
+- Date of birth
+- ID number
+- Address
+- Document type
+- Issue date
+- Expiry date
+
+Return as JSON:
+{
+  "name": "...",
+  "dateOfBirth": "...",
+  "idNumber": "...",
+  "address": "...",
+  "documentType": "...",
+  "issueDate": "...",
+  "expiryDate": "..."
+}
+`
+```
+
+## Service recommendations
+
+### Intelligent suggestions
+
+```typescript
+// lib/ai/recommendations.ts
+export async function getServiceRecommendations(
+  userQuery: string
+): Promise<Service[]> {
+  const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY!)
+  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" })
+  
+  const prompt = `
+    Based on this user query: "${userQuery}"
+    
+    Recommend relevant government services from these categories:
+    - Civil services
+    - Business services
+    - Traffic services
+    - Healthcare services
+    
+    Return service IDs as JSON array: ["service-1", "service-2"]
+  `
+  
+  const result = await model.generateContent(prompt)
+  const serviceIds = JSON.parse(result.response.text())
+  
+  // Fetch full service details
+  return await prisma.service.findMany({
+    where: { id: { in: serviceIds } }
+  })
+}
+```
+
+## Rate limiting
+
+CivicAI endpoints are rate limited to prevent abuse:
+
+```typescript
+// lib/rate-limit/index.ts
+const aiRateLimiter = new RateLimiter({
+  windowMs: 60 * 1000, // 1 minute
+  max: 20, // 20 requests per minute
+  keyGenerator: (req) => req.headers.get("x-user-id") || req.ip
+})
+
+// Apply in API route
+export async function POST(req: Request) {
+  const rateLimitResult = await aiRateLimiter.check(req)
+  
+  if (!rateLimitResult.success) {
+    return NextResponse.json(
+      { error: "Rate limit exceeded" },
+      { status: 429 }
+    )
+  }
+  
+  // Process request...
+}
+```
+
+## Monitoring and analytics
+
+### Track usage
+
+```typescript
+// lib/ai/analytics.ts
+export async function trackAIUsage(
+  userId: string,
+  messageCount: number,
+  tokensUsed: number
+) {
+  await prisma.aiUsage.create({
+    data: {
+      userId,
+      messageCount,
+      tokensUsed,
+      timestamp: new Date()
+    }
+  })
+}
+```
+
+### Cost estimation
+
+```typescript
+// Gemini 1.5 Flash pricing (as of 2024)
+const COST_PER_1K_INPUT_TOKENS = 0.00015
+const COST_PER_1K_OUTPUT_TOKENS = 0.0006
+
+export function estimateCost(
+  inputTokens: number,
+  outputTokens: number
+): number {
+  const inputCost = (inputTokens / 1000) * COST_PER_1K_INPUT_TOKENS
+  const outputCost = (outputTokens / 1000) * COST_PER_1K_OUTPUT_TOKENS
+  return inputCost + outputCost
+}
+```
+
+## Best practices
+
+1. **Keep prompts concise** - Reduce token usage
+2. **Cache common responses** - Store frequently asked questions
+3. **Implement fallbacks** - Handle API failures gracefully
+4. **Monitor costs** - Track token usage and set budgets
+5. **Validate inputs** - Sanitize user messages
+6. **Stream responses** - Improve perceived performance
+7. **Add citations** - Link to official sources
+8. **Test thoroughly** - Verify accuracy of responses
+
+## Testing
+
+### Unit tests
+
+```typescript
+// tests/unit/ai.test.ts
+import { searchPolicies } from "@/lib/rag/policy-search"
+
+describe("Policy search", () => {
+  it("finds relevant policies", () => {
+    const results = searchPolicies("passport application")
+    expect(results).toHaveLength(3)
+    expect(results[0].title).toContain("Passport")
+  })
+})
+```
+
+### Integration tests
+
+```typescript
+// tests/integration/ai-api.test.ts
+describe("POST /api/ai", () => {
+  it("returns streaming response", async () => {
+    const response = await fetch("/api/ai", {
+      method: "POST",
+      body: JSON.stringify({
+        messages: [{ role: "user", content: "Hello" }]
+      })
+    })
+    
+    expect(response.ok).toBe(true)
+    expect(response.headers.get("content-type")).toContain("text/event-stream")
+  })
+})
+```
+
+## Troubleshooting
+
+### Common issues
+
+**API key invalid**
+- Verify `GOOGLE_AI_API_KEY` is set correctly
+- Check API key has Gemini API enabled
+- Ensure billing is enabled in Google Cloud
+
+**Rate limit exceeded**
+- Implement exponential backoff
+- Cache responses when possible
+- Upgrade to higher quota tier
+
+**Slow responses**
+- Use `gemini-1.5-flash` instead of `pro`
+- Reduce context window size
+- Implement response streaming
+
+**Inaccurate responses**
+- Improve system prompt
+- Add more context via RAG
+- Fine-tune with examples
+- Validate critical information

@@ -1,0 +1,490 @@
+---
+title: "Service navigator"
+description: "Interactive guides for 117 Bulgarian e-services"
+---
+
+## Overview
+
+The Service Navigator provides step-by-step guidance for 117 Bulgarian government e-services across 14 categories, helping citizens understand requirements and complete applications.
+
+## Features
+
+- **117 services** across 14 categories
+- **Step-by-step guides** with detailed instructions
+- **Document checklists** for each service
+- **Official links** to government portals
+- **Search and filtering** by category and keywords
+- **Mobile-responsive** design
+
+## Service categories
+
+1. **Civil services** - Birth certificates, ID cards, passports
+2. **Business services** - Company registration, licenses
+3. **Traffic services** - Driver's licenses, vehicle registration
+4. **Healthcare services** - Medical records, prescriptions
+5. **Education services** - School enrollment, diplomas
+6. **Social services** - Benefits, pensions
+7. **Tax services** - Tax declarations, payments
+8. **Property services** - Property registration, permits
+9. **Legal services** - Court documents, notary services
+10. **Employment services** - Job registration, unemployment benefits
+11. **Environmental services** - Permits, inspections
+12. **Cultural services** - Library cards, museum passes
+13. **Agricultural services** - Subsidies, permits
+14. **Other services** - Miscellaneous government services
+
+## Service structure
+
+Each service includes:
+
+```typescript
+interface Service {
+  id: string
+  slug: string
+  title: string
+  summary: string
+  category: string
+  agency: string
+  steps: Step[]
+  links: Link[]
+  documents?: string[]
+  prerequisites?: string[]
+  fees?: Fee[]
+  processingTime?: string
+}
+
+interface Step {
+  id: string
+  title: string
+  description: string
+  documents?: string[]
+  tips?: string[]
+}
+
+interface Link {
+  label: string
+  href: string
+}
+
+interface Fee {
+  description: string
+  amount: number
+  currency: string
+}
+```
+
+## API endpoints
+
+### GET /api/services
+
+Get all services with optional filtering.
+
+**Query parameters:**
+- `category` - Filter by category
+- `search` - Search query
+- `limit` - Results per page (default: 20)
+- `offset` - Pagination offset
+
+**Example:**
+```bash
+curl "http://localhost:3000/api/services?category=civil&limit=10"
+```
+
+### GET /api/services/[id]
+
+Get service details by ID.
+
+**Example:**
+```bash
+curl "http://localhost:3000/api/services/passport-application"
+```
+
+### GET /api/services/categories
+
+Get all categories with service counts.
+
+**Example:**
+```bash
+curl "http://localhost:3000/api/services/categories"
+```
+
+## Adding new services
+
+### 1. Define service data
+
+Create service definition in `data/egov/services-{category}.ts`:
+
+```typescript
+// data/egov/services-civil.ts
+export const civilServices: Service[] = [
+  {
+    id: "new-service",
+    slug: "new-service",
+    title: "New Service Title",
+    summary: "Brief description of the service",
+    category: "civil",
+    agency: "Ministry of Interior",
+    steps: [
+      {
+        id: "step-1",
+        title: "Prepare documents",
+        description: "Gather required documents",
+        documents: [
+          "ID card",
+          "Proof of address"
+        ]
+      },
+      {
+        id: "step-2",
+        title: "Submit application",
+        description: "Visit local office or apply online"
+      }
+    ],
+    links: [
+      {
+        label: "Official website",
+        href: "https://example.gov.bg"
+      }
+    ],
+    fees: [
+      {
+        description: "Application fee",
+        amount: 10,
+        currency: "BGN"
+      }
+    ],
+    processingTime: "5-10 business days"
+  }
+]
+```
+
+### 2. Export service
+
+Add to main services export in `data/egov/services.ts`:
+
+```typescript
+import { civilServices } from "./services-civil"
+import { businessServices } from "./services-business"
+
+export const allServices = [
+  ...civilServices,
+  ...businessServices,
+  // Add new category here
+]
+```
+
+### 3. Create service page
+
+Service pages are automatically generated from the data. No additional page creation needed.
+
+## UI components
+
+### Service list
+
+```typescript
+// components/services/ServiceList.tsx
+import { ServiceCard } from "./ServiceCard"
+
+export function ServiceList({ services }: { services: Service[] }) {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      {services.map(service => (
+        <ServiceCard key={service.id} service={service} />
+      ))}
+    </div>
+  )
+}
+```
+
+### Service card
+
+```typescript
+// components/services/ServiceCard.tsx
+import Link from "next/link"
+import { Card } from "@/components/ui/card"
+
+export function ServiceCard({ service }: { service: Service }) {
+  return (
+    <Link href={`/navigator/${service.slug}`}>
+      <Card className="p-6 hover:shadow-lg transition">
+        <h3 className="text-xl font-semibold mb-2">
+          {service.title}
+        </h3>
+        <p className="text-gray-600 mb-4">
+          {service.summary}
+        </p>
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-gray-500">
+            {service.agency}
+          </span>
+          <span className="text-sm font-medium text-blue-600">
+            {service.steps.length} steps
+          </span>
+        </div>
+      </Card>
+    </Link>
+  )
+}
+```
+
+### Service detail
+
+```typescript
+// components/services/ServiceDetail.tsx
+export function ServiceDetail({ service }: { service: Service }) {
+  return (
+    <div className="max-w-4xl mx-auto">
+      <h1 className="text-4xl font-bold mb-4">{service.title}</h1>
+      <p className="text-xl text-gray-600 mb-8">{service.summary}</p>
+      
+      {/* Steps */}
+      <div className="space-y-6">
+        {service.steps.map((step, index) => (
+          <div key={step.id} className="border-l-4 border-blue-500 pl-6">
+            <h3 className="text-2xl font-semibold mb-2">
+              {index + 1}. {step.title}
+            </h3>
+            <p className="text-gray-700 mb-4">{step.description}</p>
+            
+            {step.documents && (
+              <div className="mb-4">
+                <h4 className="font-medium mb-2">Required documents:</h4>
+                <ul className="list-disc list-inside">
+                  {step.documents.map(doc => (
+                    <li key={doc}>{doc}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      
+      {/* Links */}
+      <div className="mt-8">
+        <h3 className="text-xl font-semibold mb-4">Useful links</h3>
+        <div className="space-y-2">
+          {service.links.map(link => (
+            <a
+              key={link.href}
+              href={link.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block text-blue-600 hover:underline"
+            >
+              {link.label} →
+            </a>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+```
+
+## Search and filtering
+
+### Client-side search
+
+```typescript
+// lib/services/service-search.ts
+import Fuse from "fuse.js"
+
+const fuse = new Fuse(allServices, {
+  keys: ["title", "summary", "category"],
+  threshold: 0.3
+})
+
+export function searchServices(query: string): Service[] {
+  if (!query) return allServices
+  
+  return fuse.search(query).map(result => result.item)
+}
+```
+
+### Category filtering
+
+```typescript
+export function filterByCategory(
+  services: Service[],
+  category: string
+): Service[] {
+  if (!category) return services
+  
+  return services.filter(s => s.category === category)
+}
+```
+
+## Application workflow
+
+### 1. Browse services
+
+User browses service catalog or searches for specific service.
+
+### 2. View service details
+
+User views step-by-step guide with requirements.
+
+### 3. Apply for service
+
+User clicks "Apply" button to start application.
+
+### 4. Fill application form
+
+Dynamic form generated based on service requirements.
+
+### 5. Submit application
+
+Application submitted to government portal or stored locally.
+
+### 6. Track status
+
+User can track application status in dashboard.
+
+## Integration with government portals
+
+### Portal.IS integration
+
+```typescript
+// lib/egov/providers/portal-is.ts
+export class PortalISProvider {
+  async submitApplication(
+    serviceId: string,
+    data: Record<string, any>
+  ): Promise<ApplicationResult> {
+    const response = await fetch(
+      `${process.env.PORTAL_IS_API_URL}/applications`,
+      {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${process.env.PORTAL_IS_TOKEN}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          serviceId,
+          data
+        })
+      }
+    )
+    
+    return await response.json()
+  }
+}
+```
+
+### Demo provider
+
+For development and testing:
+
+```typescript
+// lib/egov/providers/demo.ts
+export class DemoProvider {
+  async submitApplication(
+    serviceId: string,
+    data: Record<string, any>
+  ): Promise<ApplicationResult> {
+    // Simulate API delay
+    await new Promise(resolve => setTimeout(resolve, 1000))
+    
+    return {
+      applicationId: generateId(),
+      status: "PENDING",
+      submittedAt: new Date()
+    }
+  }
+}
+```
+
+## Analytics
+
+Track service usage:
+
+```typescript
+// lib/services/analytics.ts
+export async function trackServiceView(serviceId: string) {
+  await prisma.serviceView.create({
+    data: {
+      serviceId,
+      timestamp: new Date()
+    }
+  })
+}
+
+export async function getPopularServices(limit: number = 10) {
+  return await prisma.serviceView.groupBy({
+    by: ["serviceId"],
+    _count: true,
+    orderBy: {
+      _count: {
+        serviceId: "desc"
+      }
+    },
+    take: limit
+  })
+}
+```
+
+## SEO optimization
+
+### Dynamic metadata
+
+```typescript
+// app/navigator/[slug]/page.tsx
+export async function generateMetadata({ params }) {
+  const service = await getService(params.slug)
+  
+  return {
+    title: `${service.title} | BIGPEDAL`,
+    description: service.summary,
+    openGraph: {
+      title: service.title,
+      description: service.summary,
+      type: "website"
+    }
+  }
+}
+```
+
+### Static generation
+
+```typescript
+export async function generateStaticParams() {
+  const services = await getAllServices()
+  
+  return services.map(service => ({
+    slug: service.slug
+  }))
+}
+```
+
+## Best practices
+
+1. **Keep service data updated** - Review quarterly
+2. **Verify official links** - Check links are still valid
+3. **Test application flows** - Ensure integrations work
+4. **Monitor user feedback** - Collect and act on feedback
+5. **Track analytics** - Understand which services are popular
+6. **Optimize for mobile** - Most users access on mobile
+7. **Provide clear instructions** - Use simple language
+8. **Include examples** - Show sample documents
+
+## Troubleshooting
+
+### Service not found
+
+- Check service slug is correct
+- Verify service is exported in `services.ts`
+- Clear Next.js cache: `rm -rf .next`
+
+### Application submission fails
+
+- Check provider configuration
+- Verify API credentials
+- Check network connectivity
+- Review error logs
+
+### Search not working
+
+- Rebuild search index
+- Check Fuse.js configuration
+- Verify service data structure

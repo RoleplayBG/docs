@@ -1,0 +1,506 @@
+---
+title: "Database"
+description: "Prisma ORM with PostgreSQL schema and migrations"
+---
+
+## Overview
+
+BIGPEDAL uses Prisma ORM with PostgreSQL for data persistence. The schema includes models for users, services, applications, QES jobs, consent management, and audit logging.
+
+## Database setup
+
+### Prerequisites
+
+- PostgreSQL 14 or higher
+- Node.js 18 or higher
+
+### Installation
+
+```bash
+# Install dependencies
+npm install
+
+# Generate Prisma Client
+npx prisma generate
+
+# Run migrations
+npx prisma migrate dev
+
+# Seed database (optional)
+npx prisma db seed
+```
+
+### Connection string
+
+Set the `DATABASE_URL` environment variable:
+
+```bash
+# Local development
+DATABASE_URL="postgresql://user:password@localhost:5432/bigpedal"
+
+# Production (Railway, Supabase, Neon, etc.)
+DATABASE_URL="postgresql://user:password@host:5432/database?sslmode=require"
+```
+
+## Schema overview
+
+### User model
+
+```prisma
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  password      String
+  egn           String?   @unique
+  role          Role      @default(USER)
+  emailVerified DateTime?
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  // Relations
+  accounts      Account[]
+  sessions      Session[]
+  applications  Application[]
+  qesJobs       QESJob[]
+  consents      Consent[]
+  reminders     Reminder[]
+  auditLogs     AuditLog[]
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+```
+
+### Application model
+
+```prisma
+model Application {
+  id          String            @id @default(cuid())
+  userId      String
+  serviceId   String
+  status      ApplicationStatus @default(PENDING)
+  data        Json
+  documents   String[]
+  submittedAt DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  
+  // Relations
+  user        User              @relation(fields: [userId], references: [id])
+}
+
+enum ApplicationStatus {
+  PENDING
+  IN_PROGRESS
+  APPROVED
+  REJECTED
+  COMPLETED
+}
+```
+
+### QES job model
+
+```prisma
+model QESJob {
+  id              String    @id @default(cuid())
+  userId          String
+  title           String
+  documentUrl     String
+  signedUrl       String?
+  status          QESStatus @default(PENDING)
+  provider        String    @default("demo")
+  providerJobId   String?
+  createdAt       DateTime  @default(now())
+  completedAt     DateTime?
+  
+  // Relations
+  user            User      @relation(fields: [userId], references: [id])
+}
+
+enum QESStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+```
+
+### Consent model
+
+```prisma
+model Consent {
+  id          String    @id @default(cuid())
+  userId      String
+  purposeId   String
+  granted     Boolean   @default(true)
+  grantedAt   DateTime  @default(now())
+  revokedAt   DateTime?
+  expiresAt   DateTime?
+  
+  // Relations
+  user        User      @relation(fields: [userId], references: [id])
+  purpose     ConsentPurpose @relation(fields: [purposeId], references: [id])
+}
+
+model ConsentPurpose {
+  id          String    @id @default(cuid())
+  name        String
+  description String
+  required    Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  
+  // Relations
+  consents    Consent[]
+}
+```
+
+### Reminder model
+
+```prisma
+model Reminder {
+  id          String    @id @default(cuid())
+  userId      String
+  title       String
+  description String?
+  dueDate     DateTime
+  completed   Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  
+  // Relations
+  user        User      @relation(fields: [userId], references: [id])
+}
+```
+
+### Audit log model
+
+```prisma
+model AuditLog {
+  id          String    @id @default(cuid())
+  userId      String?
+  action      String
+  resource    String
+  resourceId  String?
+  metadata    Json?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime  @default(now())
+  
+  // Relations
+  user        User?     @relation(fields: [userId], references: [id])
+}
+```
+
+### OTP model
+
+```prisma
+model OTP {
+  id        String   @id @default(cuid())
+  email     String
+  code      String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  
+  @@index([email, code])
+}
+```
+
+## Migrations
+
+### Creating migrations
+
+```bash
+# Create a new migration
+npx prisma migrate dev --name add_new_field
+
+# Apply migrations in production
+npx prisma migrate deploy
+
+# Reset database (development only)
+npx prisma migrate reset
+```
+
+### Migration files
+
+Migrations are stored in `prisma/migrations/`:
+
+```
+prisma/migrations/
+├── 20251125122350_init/
+│   └── migration.sql
+├── 20251130113738_add_audit_log_model/
+│   └── migration.sql
+└── migration_lock.toml
+```
+
+## Prisma Client usage
+
+### Basic queries
+
+```typescript
+import { prisma } from "@/lib/prisma"
+
+// Find user by email
+const user = await prisma.user.findUnique({
+  where: { email: "user@example.com" }
+})
+
+// Create application
+const application = await prisma.application.create({
+  data: {
+    userId: user.id,
+    serviceId: "service-id",
+    status: "PENDING",
+    data: { field1: "value1" },
+    documents: []
+  }
+})
+
+// Update application status
+await prisma.application.update({
+  where: { id: application.id },
+  data: { status: "APPROVED" }
+})
+
+// Delete reminder
+await prisma.reminder.delete({
+  where: { id: "reminder-id" }
+})
+```
+
+### Relations
+
+```typescript
+// Include related data
+const user = await prisma.user.findUnique({
+  where: { id: "user-id" },
+  include: {
+    applications: true,
+    qesJobs: true,
+    consents: {
+      include: {
+        purpose: true
+      }
+    }
+  }
+})
+
+// Filter by relation
+const applications = await prisma.application.findMany({
+  where: {
+    user: {
+      email: "user@example.com"
+    }
+  }
+})
+```
+
+### Transactions
+
+```typescript
+// Atomic operations
+await prisma.$transaction([
+  prisma.application.create({
+    data: { /* ... */ }
+  }),
+  prisma.auditLog.create({
+    data: {
+      action: "APPLICATION_CREATED",
+      resource: "Application",
+      resourceId: "app-id"
+    }
+  })
+])
+
+// Interactive transactions
+await prisma.$transaction(async (tx) => {
+  const user = await tx.user.findUnique({
+    where: { id: "user-id" }
+  })
+  
+  if (!user) throw new Error("User not found")
+  
+  await tx.application.create({
+    data: { userId: user.id, /* ... */ }
+  })
+})
+```
+
+### Pagination
+
+```typescript
+// Cursor-based pagination
+const applications = await prisma.application.findMany({
+  take: 20,
+  skip: 1,
+  cursor: {
+    id: "last-id"
+  },
+  orderBy: {
+    createdAt: "desc"
+  }
+})
+
+// Offset-based pagination
+const applications = await prisma.application.findMany({
+  take: 20,
+  skip: 40, // Page 3
+  orderBy: {
+    createdAt: "desc"
+  }
+})
+```
+
+## Prisma Studio
+
+Prisma Studio provides a GUI for database management:
+
+```bash
+npx prisma studio
+```
+
+Access at http://localhost:5555
+
+## Database optimization
+
+### Indexes
+
+Add indexes for frequently queried fields:
+
+```prisma
+model Application {
+  // ...
+  
+  @@index([userId])
+  @@index([status])
+  @@index([submittedAt])
+}
+```
+
+### Connection pooling
+
+Configure connection pool size:
+
+```prisma
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  
+  // Connection pool settings
+  relationMode = "prisma"
+}
+```
+
+Environment variable:
+
+```bash
+DATABASE_URL="postgresql://user:pass@host:5432/db?connection_limit=10"
+```
+
+## Backup and restore
+
+### Backup
+
+```bash
+# Dump database
+pg_dump -h localhost -U user -d bigpedal > backup.sql
+
+# Dump with compression
+pg_dump -h localhost -U user -d bigpedal | gzip > backup.sql.gz
+```
+
+### Restore
+
+```bash
+# Restore from dump
+psql -h localhost -U user -d bigpedal < backup.sql
+
+# Restore from compressed dump
+gunzip -c backup.sql.gz | psql -h localhost -U user -d bigpedal
+```
+
+## Multi-tenancy
+
+BIGPEDAL supports multi-tenant architecture with tenant isolation:
+
+```prisma
+model Tenant {
+  id        String   @id @default(cuid())
+  name      String
+  domain    String   @unique
+  plan      String   @default("FREE")
+  createdAt DateTime @default(now())
+  
+  // Relations
+  users     User[]
+}
+
+model User {
+  id        String  @id @default(cuid())
+  tenantId  String
+  // ...
+  
+  tenant    Tenant  @relation(fields: [tenantId], references: [id])
+}
+```
+
+### Row-level security
+
+Enable RLS in PostgreSQL:
+
+```sql
+-- Enable RLS
+ALTER TABLE "User" ENABLE ROW LEVEL SECURITY;
+
+-- Create policy
+CREATE POLICY tenant_isolation ON "User"
+  USING (tenant_id = current_setting('app.current_tenant')::text);
+```
+
+## Troubleshooting
+
+### Common issues
+
+**Migration failed**
+```bash
+# Mark migration as applied
+npx prisma migrate resolve --applied "migration-name"
+
+# Roll back migration
+npx prisma migrate resolve --rolled-back "migration-name"
+```
+
+**Connection timeout**
+```bash
+# Increase timeout
+DATABASE_URL="postgresql://...?connect_timeout=30"
+```
+
+**Too many connections**
+```bash
+# Reduce connection pool
+DATABASE_URL="postgresql://...?connection_limit=5"
+```
+
+### Debugging
+
+Enable query logging:
+
+```typescript
+const prisma = new PrismaClient({
+  log: ['query', 'info', 'warn', 'error'],
+})
+```
+
+## Best practices
+
+1. **Always use transactions** for related operations
+2. **Add indexes** for frequently queried fields
+3. **Use select** to limit returned fields
+4. **Implement soft deletes** for important data
+5. **Regular backups** of production database
+6. **Monitor query performance** with Prisma Studio
+7. **Use connection pooling** in production
+8. **Validate data** before database operations
